@@ -1,3 +1,14 @@
+cd ~/aerolink-platform
+
+aws s3 cp openapi/aerolink-api.yaml s3://aerolink-pramishka-frontend-2026/openapi/aerolink-api.yaml
+
+aws cloudfront create-invalidation \
+--distribution-id E2AYN3F94A2T6G \
+--paths "/*"
+
+
+
+
 openapi: 3.0.0
 
 info:
