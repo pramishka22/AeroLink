@@ -1,0 +1,21 @@
+{
+    "family": "baggage-service-task",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "256",
+    "memory": "512",
+    "executionRoleArn": "arn:aws:iam::084051596652:role/AeroLinkECSTaskExecutionRole",
+    "containerDefinitions": [
+      {
+        "name": "baggage-service",
+        "image": "084051596652.dkr.ecr.us-east-1.amazonaws.com/baggage-service:latest",
+        "essential": true,
+        "portMappings": [
+          {
+            "containerPort": 3000,
+            "protocol": "tcp"
+          }
+        ]
+      }
+    ]
+  }

@@ -1,0 +1,148 @@
+openapi: 3.0.0
+info:
+  title: AeroLink Airline Systems API
+  version: 1.0.0
+  description: Cloud-based distributed microservices API for AeroLink airline operations.
+
+servers:
+  - url: https://yzyfq3ys00.execute-api.us-east-1.amazonaws.com/prod
+    description: AWS Lambda-powered airline microservices API
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/register:
+    post:
+      summary: Register a new user
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              name: Admin User
+              email: admin@aerolink.com
+              password: Admin123
+              role: admin
+      responses:
+        "201":
+          description: User registered successfully
+
+  /auth/login:
+    post:
+      summary: Login user and return JWT token
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              email: admin@aerolink.com
+              password: Admin123
+      responses:
+        "200":
+          description: Login successful
+
+  /flights:
+    get:
+      summary: Get all flights
+      tags: [Flights]
+      security: []
+      responses:
+        "200":
+          description: List of flights
+
+  /bookings:
+    get:
+      summary: Get all bookings
+      tags: [Bookings]
+      responses:
+        "200":
+          description: List of bookings
+    post:
+      summary: Create a booking
+      tags: [Bookings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              user: Pramishka
+              flightId: 1
+              seatsBooked: 1
+      responses:
+        "201":
+          description: Booking created successfully
+
+  /baggage:
+    get:
+      summary: Get baggage records
+      tags: [Baggage]
+      responses:
+        "200":
+          description: List of baggage records
+    post:
+      summary: Create baggage record
+      tags: [Baggage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              bookingId: 1
+              passengerName: Pramishka
+              tagNumber: BAG-AL100-001
+      responses:
+        "201":
+          description: Baggage created successfully
+
+  /baggage/{id}/status:
+    put:
+      summary: Update baggage status
+      tags: [Baggage]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              status: Arrived at Destination
+      responses:
+        "200":
+          description: Baggage status updated successfully
+
+  /notifications:
+    get:
+      summary: Get notifications
+      tags: [Notifications]
+      responses:
+        "200":
+          description: List of notifications
+    post:
+      summary: Create notification
+      tags: [Notifications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              type: BAGGAGE_UPDATED
+              message: Baggage status updated
+      responses:
+        "201":
+          description: Notification created successfully
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

@@ -1,0 +1,47 @@
+services:
+  auth-service:
+    build: ./services/auth-service
+    ports:
+      - "3001:3001"
+
+  flight-service:
+    build: ./services/flight-service
+    ports:
+      - "3002:3002"
+
+  booking-service:
+    build: ./services/booking-service
+    ports:
+      - "3003:3003"
+    depends_on:
+      - flight-service
+
+  baggage-service:
+    build: ./services/baggage-service
+    ports:
+      - "3004:3004"
+    depends_on:
+      - notification-service
+
+  notification-service:
+    build: ./services/notification-service
+    ports:
+      - "3005:3005"
+
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "3000:3000"
+    depends_on:
+      - auth-service
+      - flight-service
+      - booking-service
+      - baggage-service
+      - notification-service
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api-gateway

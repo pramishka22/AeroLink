@@ -1,0 +1,21 @@
+{
+    "family": "notification-service-task",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "256",
+    "memory": "512",
+    "executionRoleArn": "arn:aws:iam::084051596652:role/AeroLinkECSTaskExecutionRole",
+    "containerDefinitions": [
+      {
+        "name": "notification-service",
+        "image": "084051596652.dkr.ecr.us-east-1.amazonaws.com/notification-service:latest",
+        "essential": true,
+        "portMappings": [
+          {
+            "containerPort": 3000,
+            "protocol": "tcp"
+          }
+        ]
+      }
+    ]
+  }
