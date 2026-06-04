@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import Sidebar from "../components/Sidebar";
 import Navbar from "../components/Navbar";
+import LoadingSpinner from "../components/LoadingSpinner";
+import SkeletonLoader from "../components/SkeletonLoader";
+import SearchBar from "../components/SearchBar";
 
 const API = "https://yzyfq3ys00.execute-api.us-east-1.amazonaws.com/prod";
 
@@ -18,6 +21,23 @@ function Dashboard() {
   const [selectedCheckInBookingId, setSelectedCheckInBookingId] = useState("");
   const [checkInResult, setCheckInResult] = useState(null);
   const [airportEvents, setAirportEvents] = useState([]);
+  const [loadingStates, setLoadingStates] = useState({
+    flights: false,
+    bookings: false,
+    baggage: false,
+    notifications: false,
+    users: false,
+    checkIns: false,
+    airportEvents: false
+  });
+  const [searchStates, setSearchStates] = useState({
+    bookings: "",
+    baggage: "",
+    checkIns: "",
+    users: "",
+    airportEvents: "",
+    notifications: ""
+  });
   const [airportForm, setAirportForm] = useState({
     flightId: "",
     airportCode: "CMB",
@@ -61,6 +81,11 @@ function Dashboard() {
   const userRole = localStorage.getItem("userRole");
   const isAdminOrStaff = userRole === "admin" || userRole === "staff";
 
+  if (!token) {
+    window.location.href = "/#/login";
+    return null;
+  }
+
   const authHeader = {
     headers: { Authorization: `Bearer ${token}` }
   };
@@ -70,6 +95,32 @@ function Dashboard() {
       error.response?.data?.message ||
       "Service temporarily unavailable. Please try again shortly."
     );
+  };
+
+  const failureCountRef = useRef(0);
+  const circuitOpenUntilRef = useRef(null);
+  
+  const circuitBreakerRequest = async (requestFunction) => {
+    const now = Date.now();
+  
+    if (circuitOpenUntilRef.current && now < circuitOpenUntilRef.current) {
+      throw new Error("Circuit breaker is open. Service temporarily unavailable.");
+    }
+  
+    try {
+      const result = await requestFunction();
+      failureCountRef.current = 0;
+      circuitOpenUntilRef.current = null;
+      return result;
+    } catch (error) {
+      failureCountRef.current += 1;
+  
+      if (failureCountRef.current >= 3) {
+        circuitOpenUntilRef.current = Date.now() + 30000;
+      }
+  
+      throw error;
+    }
   };
 
   const apiRequest = async (requestFunction, retries = 2) => {
@@ -85,22 +136,30 @@ function Dashboard() {
   };
 
   const loadFlights = async () => {
+    setLoadingStates(prev => ({ ...prev, flights: true }));
     try {
       const res = await apiRequest(() => axios.get(`${API}/flights`));
       setFlights(res.data);
       setMessage("Flights loaded");
     } catch (error) {
       showError(error);
+    } finally {
+      setLoadingStates(prev => ({ ...prev, flights: false }));
     }
   };
 
   const loadBookings = async () => {
+    setLoadingStates(prev => ({ ...prev, bookings: true }));
     try {
-      const res = await apiRequest(() => axios.get(`${API}/bookings`, authHeader));      
+      const res = await circuitBreakerRequest(() =>
+        axios.get(`${API}/bookings`, authHeader)
+      );
       setBookings(res.data);
       setMessage("Bookings loaded");
     } catch (error) {
-      showError(error);
+      setMessage(error.message || "Booking Service temporarily unavailable.");
+    } finally {
+      setLoadingStates(prev => ({ ...prev, bookings: false }));
     }
   };
 
@@ -229,12 +288,15 @@ function Dashboard() {
   };
 
   const loadBaggage = async () => {
+    setLoadingStates(prev => ({ ...prev, baggage: true }));
     try {
       const res = await apiRequest(() => axios.get(`${API}/baggage`, authHeader));     
-       setBaggage(res.data);
+      setBaggage(res.data);
       setMessage("Baggage loaded");
     } catch (error) {
       showError(error);
+    } finally {
+      setLoadingStates(prev => ({ ...prev, baggage: false }));
     }
   };
 
@@ -267,12 +329,15 @@ function Dashboard() {
   };
 
   const loadNotifications = async () => {
+    setLoadingStates(prev => ({ ...prev, notifications: true }));
     try {
       const res = await apiRequest(() => axios.get(`${API}/notifications`, authHeader));      
       setNotifications(res.data);
       setMessage("Notifications loaded");
     } catch (error) {
       showError(error);
+    } finally {
+      setLoadingStates(prev => ({ ...prev, notifications: false }));
     }
   };
 
@@ -336,12 +401,15 @@ function Dashboard() {
   };
 
   const loadUsers = async () => {
+    setLoadingStates(prev => ({ ...prev, users: true }));
     try {
       const res = await axios.get(`${API}/users`, authHeader);
       setUsers(res.data);
       setMessage("Users loaded");
     } catch (error) {
       showError(error);
+    } finally {
+      setLoadingStates(prev => ({ ...prev, users: false }));
     }
   };
   
@@ -361,12 +429,15 @@ function Dashboard() {
   };
 
   const loadCheckIns = async () => {
+    setLoadingStates(prev => ({ ...prev, checkIns: true }));
     try {
       const res = await apiRequest(() => axios.get(`${API}/checkins`, authHeader));
       setCheckIns(res.data);
       setMessage("Check-ins loaded");
     } catch (error) {
       showError(error);
+    } finally {
+      setLoadingStates(prev => ({ ...prev, checkIns: false }));
     }
   };
   
@@ -406,12 +477,15 @@ function Dashboard() {
   };
 
   const loadAirportEvents = async () => {
+    setLoadingStates(prev => ({ ...prev, airportEvents: true }));
     try {
       const res = await apiRequest(() => axios.get(`${API}/airport/events`));
       setAirportEvents(res.data);
       setMessage("Airport integration events loaded");
     } catch (error) {
       showError(error);
+    } finally {
+      setLoadingStates(prev => ({ ...prev, airportEvents: false }));
     }
   };
   
@@ -459,85 +533,114 @@ function Dashboard() {
     return flights.find((flight) => String(flight.id) === String(booking.flightId));
   };
 
+  const filterItems = (items, searchTerm) => {
+    if (!searchTerm) return items;
+    const term = searchTerm.toLowerCase();
+    return items.filter(item => {
+      return Object.values(item).some(value => 
+        value && String(value).toLowerCase().includes(term)
+      );
+    });
+  };
+
+  const filteredBookings = filterItems(bookings, searchStates.bookings);
+  const filteredBaggage = filterItems(baggage, searchStates.baggage);
+  const filteredCheckIns = filterItems(checkIns, searchStates.checkIns);
+  const filteredUsers = filterItems(users, searchStates.users);
+  const filteredAirportEvents = filterItems(airportEvents, searchStates.airportEvents);
+  const filteredNotifications = filterItems(notifications, searchStates.notifications);
+
+  const updateSearch = (type, value) => {
+    setSearchStates(prev => ({ ...prev, [type]: value }));
+  };
+
+  const clearSearch = (type) => {
+    setSearchStates(prev => ({ ...prev, [type]: "" }));
+  };
+
   return (
     <div className="app">
       <Sidebar />
-
       <main className="main">
         <Navbar message={message} />
-
-        <section className="hero">
-          <div>
-            <p className="eyebrow">Cloud Native Airline Platform</p>
-            <h1>AeroLink Distributed Web Application</h1>
-            <p>
-              Secure airline operations dashboard using microservices, API Gateway,
-              JWT authentication, service-to-service communication, and event-style
-              notification updates.
-            </p>
+        
+        <section id="dashboard-overview" className="hero">
+          <div className="hero-content">
+            <div className="hero-badge">Digital Airline Operations Hub</div>
+            <h1 className="hero-title">AeroLink<br />Digital Airline Management Platform</h1>
+            <p className="hero-description">
+            Centralised operational dashboard for managing flight schedules, passenger services, baggage operations, payments, and airport events with real-time visibility across distributed airline services.</p>
           </div>
-
-          <div className="hero-card">
-            <span>Security Mode</span>
-            <h3>JWT Protected</h3>
-            <p>Bookings, baggage, and notifications require authenticated access.</p>
+          <div className="hero-stats">
+            <div className="hero-stat">
+              <div className="hero-stat-value">{flights.length}</div>
+              <div className="hero-stat-label">Active Flights</div>
+            </div>
+            <div className="hero-stat">
+              <div className="hero-stat-value">{bookings.length}</div>
+              <div className="hero-stat-label">Total Bookings</div>
+            </div>
+            <div className="hero-stat">
+              <div className="hero-stat-value">{notifications.length}</div>
+              <div className="hero-stat-label">Events</div>
+            </div>
           </div>
         </section>
 
-        <section id="overview" className="stats-grid">
+        <section id="dashboard-stats" className="stats-grid">
           <div className="stat-card">
-            <span>Flights</span>
-            <h2>{flights.length}</h2>
-            <p>Active flight records</p>
+            <div className="stat-icon"></div>
+            <span className="stat-label">Flights</span>
+            <h2 className="stat-number">{flights.length}</h2>
+            <p className="stat-description">Active flight records</p>
           </div>
-
           <div className="stat-card">
-            <span>Bookings</span>
-            <h2>{bookings.length}</h2>
-            <p>Confirmed passenger bookings</p>
+            <div className="stat-icon"></div>
+            <span className="stat-label">Bookings</span>
+            <h2 className="stat-number">{bookings.length}</h2>
+            <p className="stat-description">Confirmed passenger bookings</p>
           </div>
-
           <div className="stat-card">
-            <span>Baggage</span>
-            <h2>{baggage.length}</h2>
-            <p>Tracked baggage records</p>
+            <div className="stat-icon"></div>
+            <span className="stat-label">Baggage</span>
+            <h2 className="stat-number">{baggage.length}</h2>
+            <p className="stat-description">Tracked baggage records</p>
           </div>
-
           <div className="stat-card">
-            <span>Notifications</span>
-            <h2>{notifications.length}</h2>
-            <p>Generated system events</p>
+            <div className="stat-icon"></div>
+            <span className="stat-label">Notifications</span>
+            <h2 className="stat-number">{notifications.length}</h2>
+            <p className="stat-description">Generated system events</p>
           </div>
-
           <div className="stat-card">
-            <span>Check-ins</span>
-            <h2>{checkIns.length}</h2>
-            <p>Generated boarding passes</p>
+            <div className="stat-icon"></div>
+            <span className="stat-label">Check-ins</span>
+            <h2 className="stat-number">{checkIns.length}</h2>
+            <p className="stat-description">Generated boarding passes</p>
           </div>
-
           <div className="stat-card">
-            <span>Airport Events</span>
-            <h2>{airportEvents.length}</h2>
-            <p>Third-party airport updates</p>
+            <div className="stat-icon"></div>
+            <span className="stat-label">Airport Events</span>
+            <h2 className="stat-number">{airportEvents.length}</h2>
+            <p className="stat-description">Third-party airport updates</p>
           </div>         
         </section>
 
-        <section id="flights" className="panel">
+        <section id="dashboard-flights" className="panel">
           <div className="panel-header">
-            <div>
+            <div className="panel-header-left">
               <h2>Flight Operations</h2>
-              <p>Monitor, create, and update flight schedule, pricing, and status.</p>
+              <p>Manage flight schedules, fares, seat availability, and operational status across the airline network.</p>
             </div>
-            <button onClick={loadFlights}>Refresh Flights</button>
+            <div className="panel-header-actions">
+              <button className="btn-primary" onClick={loadFlights}>Refresh Flights</button>
+            </div>
           </div>
 
           {isAdminOrStaff && (
             <>
-              <div className="actions">
-                <select
-                  value={selectedFlightId}
-                  onChange={(e) => setSelectedFlightId(e.target.value)}
-                >
+              <div className="actions-group">
+                <select className="select-input" value={selectedFlightId} onChange={(e) => setSelectedFlightId(e.target.value)}>
                   <option value="">Select flight to update</option>
                   {flights.map((flight) => (
                     <option key={flight.id} value={flight.id}>
@@ -545,21 +648,8 @@ function Dashboard() {
                     </option>
                   ))}
                 </select>
-
-                <input
-                  placeholder="New price"
-                  value={flightUpdate.price}
-                  onChange={(e) =>
-                    setFlightUpdate({ ...flightUpdate, price: e.target.value })
-                  }
-                />
-
-                <select
-                  value={flightUpdate.status}
-                  onChange={(e) =>
-                    setFlightUpdate({ ...flightUpdate, status: e.target.value })
-                  }
-                >
+                <input className="text-input" placeholder="New price" value={flightUpdate.price} onChange={(e) => setFlightUpdate({ ...flightUpdate, price: e.target.value })} />
+                <select className="select-input" value={flightUpdate.status} onChange={(e) => setFlightUpdate({ ...flightUpdate, status: e.target.value })}>
                   <option value="">Update status</option>
                   <option value="Scheduled">Scheduled</option>
                   <option value="Delayed">Delayed</option>
@@ -567,139 +657,61 @@ function Dashboard() {
                   <option value="Boarding">Boarding</option>
                   <option value="Departed">Departed</option>
                 </select>
-
-                <input
-                  type="datetime-local"
-                  value={flightUpdate.departureTime}
-                  onChange={(e) =>
-                    setFlightUpdate({ ...flightUpdate, departureTime: e.target.value })
-                  }
-                />
-
-                <input
-                  type="datetime-local"
-                  value={flightUpdate.arrivalTime}
-                  onChange={(e) =>
-                    setFlightUpdate({ ...flightUpdate, arrivalTime: e.target.value })
-                  }
-                />
-
-                <button onClick={updateFlight}>Update Selected Flight</button>
+                <input className="text-input" type="datetime-local" value={flightUpdate.departureTime} onChange={(e) => setFlightUpdate({ ...flightUpdate, departureTime: e.target.value })} />
+                <input className="text-input" type="datetime-local" value={flightUpdate.arrivalTime} onChange={(e) => setFlightUpdate({ ...flightUpdate, arrivalTime: e.target.value })} />
+                <button className="btn-secondary" onClick={updateFlight}>Update Flight</button>
               </div>
 
               <div className="flight-form">
-                <h3>Create Flight</h3>
-
+                <h3>Create New Flight</h3>
                 <div className="form-grid">
-                  <input
-                    placeholder="Flight number"
-                    value={newFlight.flightNumber}
-                    onChange={(e) =>
-                      setNewFlight({ ...newFlight, flightNumber: e.target.value })
-                    }
-                  />
-
-                  <input
-                    placeholder="From"
-                    value={newFlight.from}
-                    onChange={(e) =>
-                      setNewFlight({ ...newFlight, from: e.target.value })
-                    }
-                  />
-
-                  <input
-                    placeholder="To"
-                    value={newFlight.to}
-                    onChange={(e) =>
-                      setNewFlight({ ...newFlight, to: e.target.value })
-                    }
-                  />
-
-                  <input
-                    type="datetime-local"
-                    value={newFlight.departureTime}
-                    onChange={(e) =>
-                      setNewFlight({ ...newFlight, departureTime: e.target.value })
-                    }
-                  />
-
-                  <input
-                    type="datetime-local"
-                    value={newFlight.arrivalTime}
-                    onChange={(e) =>
-                      setNewFlight({ ...newFlight, arrivalTime: e.target.value })
-                    }
-                  />
-
-                  <input
-                    placeholder="Price"
-                    value={newFlight.price}
-                    onChange={(e) =>
-                      setNewFlight({ ...newFlight, price: e.target.value })
-                    }
-                  />
-
-                  <input
-                    placeholder="Total seats"
-                    value={newFlight.totalSeats}
-                    onChange={(e) =>
-                      setNewFlight({ ...newFlight, totalSeats: e.target.value })
-                    }
-                  />
-
-                  <select
-                    value={newFlight.status}
-                    onChange={(e) =>
-                      setNewFlight({ ...newFlight, status: e.target.value })
-                    }
-                  >
+                  <input className="text-input" placeholder="Flight number" value={newFlight.flightNumber} onChange={(e) => setNewFlight({ ...newFlight, flightNumber: e.target.value })} />
+                  <input className="text-input" placeholder="From" value={newFlight.from} onChange={(e) => setNewFlight({ ...newFlight, from: e.target.value })} />
+                  <input className="text-input" placeholder="To" value={newFlight.to} onChange={(e) => setNewFlight({ ...newFlight, to: e.target.value })} />
+                  <input className="text-input" type="datetime-local" value={newFlight.departureTime} onChange={(e) => setNewFlight({ ...newFlight, departureTime: e.target.value })} />
+                  <input className="text-input" type="datetime-local" value={newFlight.arrivalTime} onChange={(e) => setNewFlight({ ...newFlight, arrivalTime: e.target.value })} />
+                  <input className="text-input" placeholder="Price" value={newFlight.price} onChange={(e) => setNewFlight({ ...newFlight, price: e.target.value })} />
+                  <input className="text-input" placeholder="Total seats" value={newFlight.totalSeats} onChange={(e) => setNewFlight({ ...newFlight, totalSeats: e.target.value })} />
+                  <select className="select-input" value={newFlight.status} onChange={(e) => setNewFlight({ ...newFlight, status: e.target.value })}>
                     <option value="Scheduled">Scheduled</option>
                     <option value="Delayed">Delayed</option>
                     <option value="Cancelled">Cancelled</option>
                   </select>
                 </div>
-
-                <button onClick={createFlight}>Create Flight</button>
+                <button className="btn-primary" onClick={createFlight}>Create Flight</button>
               </div>
             </>
           )}
 
-          <div className="table">
-            {flights.map((flight) => (
-              <div className="table-row" key={flight.id}>
-                <div>
-                  <strong>{flight.flightNumber}</strong>
-                  <span>{flight.airline}</span>
+          {loadingStates.flights ? (
+            <SkeletonLoader type="table" count={5} />
+          ) : (
+            <div className="data-table">
+              {flights.map((flight) => (
+                <div className="table-row" key={flight.id}>
+                  <div className="table-cell">
+                    <strong>{flight.flightNumber}</strong>
+                    <span>{flight.airline}</span>
+                  </div>
+                  <div className="table-cell">{flight.from} → {flight.to}</div>
+                  <div className="table-cell">${flight.price}</div>
+                  <div className="table-cell"><span className="badge-success">{flight.availableSeats} seats left</span></div>
+                  <div className="table-cell">{flight.status}</div>
                 </div>
-                <div>{flight.from} → {flight.to}</div>
-                <div>${flight.price}</div>
-                <div>
-                  <span className="badge">{flight.availableSeats} seats left</span>
-                </div>
-                <div>{flight.status}</div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
 
-        <section id="bookings" className="panel two-column">
-          <div>
+        <section id="dashboard-bookings" className="panel two-column">
+          <div className="panel-section">
             <h2>Passenger Booking</h2>
-            <p>
-              Create a booking through the Booking Service. The service calls the
-              Flight Service and reduces seat availability automatically.
-            </p>
-            <div className="payment-box">
+            <p>Create and manage passenger reservations with automated seat allocation, fare calculation, payment verification, and inventory updates.</p>
+            <div className="payment-card">
               <h3>Select Flight</h3>
               <p>Choose the flight you want to book before making the payment.</p>
-
               <div className="form-grid">
-                <select
-                  value={bookingForm.flightId}
-                  onChange={(e) =>
-                    setBookingForm({ ...bookingForm, flightId: e.target.value })
-                  }
-                >
+                <select className="select-input" value={bookingForm.flightId} onChange={(e) => setBookingForm({ ...bookingForm, flightId: e.target.value })}>
                   <option value="">Select a flight</option>
                   {flights.map((flight) => (
                     <option key={flight.id} value={flight.id}>
@@ -707,62 +719,17 @@ function Dashboard() {
                     </option>
                   ))}
                 </select>
-
-                <input
-                  type="number"
-                  min="1"
-                  placeholder="Seats"
-                  value={bookingForm.seatsBooked}
-                  onChange={(e) =>
-                    setBookingForm({ ...bookingForm, seatsBooked: e.target.value })
-                  }
-                />
+                <input className="text-input" type="number" min="1" placeholder="Seats" value={bookingForm.seatsBooked} onChange={(e) => setBookingForm({ ...bookingForm, seatsBooked: e.target.value })} />
               </div>
             </div>
-            <div className="payment-box">
-              <h3>Payments</h3>
-              <p>
-                This is a payment only. Use test details:
-                Card number 4111111111111111, Expiry 12/30, CVV 123.
-              </p>
-
+            <div className="payment-card">
+              <h3>Payment Details</h3>
+              <p>Test card: 4111111111111111, Expiry 12/30, CVV 123</p>
               <div className="form-grid">
-                <input
-                  placeholder="Cardholder name"
-                  value={payment.cardName}
-                  onChange={(e) => setPayment({ ...payment, cardName: e.target.value })}
-                />
-
-                <input
-                  placeholder="Card number e.g. 4111111111111111"
-                  maxLength="16"
-                  value={payment.cardNumber}
-                  onChange={(e) =>
-                    setPayment({
-                      ...payment,
-                      cardNumber: e.target.value.replace(/\D/g, "")
-                    })
-                  }
-                />
-
-                <input
-                  placeholder="MM/YY e.g. 12/30"
-                  maxLength="5"
-                  value={payment.expiry}
-                  onChange={(e) => setPayment({ ...payment, expiry: e.target.value })}
-                />
-
-                <input
-                  placeholder="CVV e.g. 123"
-                  maxLength="3"
-                  value={payment.cvv}
-                  onChange={(e) =>
-                    setPayment({
-                      ...payment,
-                      cvv: e.target.value.replace(/\D/g, "")
-                    })
-                  }
-                />
+                <input className="text-input" placeholder="Cardholder name" value={payment.cardName} onChange={(e) => setPayment({ ...payment, cardName: e.target.value })} />
+                <input className="text-input" placeholder="Card number" maxLength="16" value={payment.cardNumber} onChange={(e) => setPayment({ ...payment, cardNumber: e.target.value.replace(/\D/g, "") })} />
+                <input className="text-input" placeholder="MM/YY" maxLength="5" value={payment.expiry} onChange={(e) => setPayment({ ...payment, expiry: e.target.value })} />
+                <input className="text-input" placeholder="CVV" maxLength="3" value={payment.cvv} onChange={(e) => setPayment({ ...payment, cvv: e.target.value.replace(/\D/g, "") })} />
               </div>
               {paymentResult && (
                 <div className="payment-success">
@@ -774,78 +741,75 @@ function Dashboard() {
                 </div>
               )}
             </div>
-
-            <div className="actions">
-              <button onClick={createBooking}>Create Booking</button>
-              <button className="secondary" onClick={loadBookings}>Load Bookings</button>
+            <div className="actions-group">
+              <button className="btn-primary" onClick={createBooking}>Create Booking</button>
+              <button className="btn-secondary" onClick={loadBookings}>Load Bookings</button>
             </div>
           </div>
           
-
-          <div className="list">
-            {bookings.map((booking) => {
-              const flight = getFlightForBooking(booking);
-
-              return (
-                <div className="list-item" key={booking.id}>
-                  <strong>Booking #{booking.id}</strong>
-
-                  {flight ? (
-                    <p>
-                      {flight.flightNumber} {flight.airline}, {flight.from} → {flight.to}, ${flight.price}
-                    </p>
-                  ) : (
-                    <p>Flight ID: {booking.flightId}</p>
-                  )}
-
-                  <p>{booking.user} booked {booking.seatsBooked} seat(s)</p>
-
-                  <p>
-                    Booked at:{" "}
-                    {booking.bookingDate
-                      ? new Date(booking.bookingDate).toLocaleString()
-                      : "N/A"}
-                  </p>
-
-                  <span>{booking.status}</span>
+          <div className="panel-section">
+            <div className="search-wrapper">
+              <SearchBar placeholder="Search bookings..." value={searchStates.bookings} onChange={(val) => updateSearch("bookings", val)} onSearch={() => {}} />
+            </div>
+            {loadingStates.bookings ? (
+              <SkeletonLoader type="list" count={5} />
+            ) : (
+              <>
+                {searchStates.bookings && (
+                  <div className="filter-summary">
+                    <span>Found {filteredBookings.length} results</span>
+                    <button className="clear-filters" onClick={() => clearSearch("bookings")}>Clear</button>
+                  </div>
+                )}
+                <div className="list-container">
+                  <div className="data-list">
+                    {filteredBookings.length === 0 ? (
+                      <div className="empty-state">No bookings found</div>
+                    ) : (
+                      filteredBookings.map((booking) => {
+                        const flight = getFlightForBooking(booking);
+                        return (
+                          <div className="list-item" key={booking.id}>
+                            <strong>Booking #{booking.id}</strong>
+                            {flight ? (
+                              <p>{flight.flightNumber} {flight.airline}, {flight.from} → {flight.to}, ${flight.price}</p>
+                            ) : (
+                              <p>Flight ID: {booking.flightId}</p>
+                            )}
+                            <p>{booking.user} booked {booking.seatsBooked} seat(s)</p>
+                            <p>Booked at: {booking.bookingDate ? new Date(booking.bookingDate).toLocaleString() : "N/A"}</p>
+                            <span className="list-item-badge">{booking.status}</span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
-              );
-            })}
+              </>
+            )}
           </div>
         </section>
 
-        <section id="checkin" className="panel two-column">
-          <div>
+        <section id="dashboard-checkin" className="panel two-column">
+          <div className="panel-section">
             <h2>Passenger Check-In</h2>
-            <p>
-              Complete passenger check-in for confirmed bookings. The Check-In Service
-              generates a boarding pass number, seat number, and gate assignment.
-            </p>
-
-            <div className="actions">
-              <select
-                value={selectedCheckInBookingId}
-                onChange={(e) => setSelectedCheckInBookingId(e.target.value)}
-              >
+            <p>Process passenger check-ins and generate boarding passes with assigned seats, gate information, and travel records.</p>
+            <div className="actions-group">
+              <select className="select-input" value={selectedCheckInBookingId} onChange={(e) => setSelectedCheckInBookingId(e.target.value)}>
                 <option value="">Select booking for check-in</option>
                 {bookings.map((booking) => {
                   const flight = getFlightForBooking(booking);
-
                   return (
                     <option key={booking.id} value={booking.id}>
                       Booking #{booking.id}
-                      {flight
-                        ? ` | ${flight.flightNumber} ${flight.from} → ${flight.to}`
-                        : ` | Flight ${booking.flightId}`}
+                      {flight ? ` | ${flight.flightNumber} ${flight.from} → ${flight.to}` : ` | Flight ${booking.flightId}`}
                     </option>
                   );
                 })}
               </select>
-
-              <button onClick={createCheckIn}>Check In Passenger</button>
-              <button className="secondary" onClick={loadCheckIns}>Load Check-Ins</button>
+              <button className="btn-primary" onClick={createCheckIn}>Check In Passenger</button>
+              <button className="btn-secondary" onClick={loadCheckIns}>Load Check-Ins</button>
             </div>
-
             {checkInResult && (
               <div className="payment-success">
                 <strong>Boarding Pass Generated</strong>
@@ -858,43 +822,51 @@ function Dashboard() {
               </div>
             )}
           </div>
-
-          <div className="list">
-            {checkIns.length === 0 ? (
-              <div className="empty-state">
-                No check-ins found. Select a booking and check in the passenger.
-              </div>
+          <div className="panel-section">
+            <div className="search-wrapper">
+              <SearchBar placeholder="Search check-ins..." value={searchStates.checkIns} onChange={(val) => updateSearch("checkIns", val)} onSearch={() => {}} />
+            </div>
+            {loadingStates.checkIns ? (
+              <SkeletonLoader type="list" count={5} />
             ) : (
-              checkIns.map((checkin) => (
-                <div className="list-item" key={checkin.id}>
-                  <strong>{checkin.boardingPassNumber}</strong>
-                  <p>Passenger: {checkin.passengerName}</p>
-                  <p>Booking ID: #{checkin.bookingId}</p>
-                  <p>Flight ID: {checkin.flightId}</p>
-                  <p>Seat: {checkin.seatNumber}</p>
-                  <p>Gate: {checkin.gate}</p>
-                  <span>Status: {checkin.checkInStatus}</span>
+              <>
+                {searchStates.checkIns && (
+                  <div className="filter-summary">
+                    <span>Found {filteredCheckIns.length} results</span>
+                    <button className="clear-filters" onClick={() => clearSearch("checkIns")}>Clear</button>
+                  </div>
+                )}
+                <div className="list-container">
+                  <div className="data-list">
+                    {filteredCheckIns.length === 0 ? (
+                      <div className="empty-state">No check-ins found</div>
+                    ) : (
+                      filteredCheckIns.map((checkin) => (
+                        <div className="list-item" key={checkin.id}>
+                          <strong>{checkin.boardingPassNumber}</strong>
+                          <p>Passenger: {checkin.passengerName}</p>
+                          <p>Booking ID: #{checkin.bookingId}</p>
+                          <p>Flight ID: {checkin.flightId}</p>
+                          <p>Seat: {checkin.seatNumber}</p>
+                          <p>Gate: {checkin.gate}</p>
+                          <span className="list-item-badge">{checkin.checkInStatus}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-              ))
+              </>
             )}
           </div>
         </section>
 
-        <section id="baggage" className="panel two-column">
-          <div>
+        <section id="dashboard-baggage" className="panel two-column">
+          <div className="panel-section">
             <h2>Baggage Tracking</h2>
-            <p>
-              Create baggage records and update their status. Status updates
-              automatically create notification events.
-            </p>
-
-            <div className="actions">
-              <button onClick={createBaggage}>Create Baggage</button>
-
-              <select
-                value={selectedBaggageId}
-                onChange={(e) => setSelectedBaggageId(e.target.value)}
-              >
+            <p>Register, track, and manage passenger baggage throughout the travel journey with automated operational notifications.</p>
+            <div className="actions-group">
+              <button className="btn-primary" onClick={createBaggage}>Create Baggage</button>
+              <select className="select-input" value={selectedBaggageId} onChange={(e) => setSelectedBaggageId(e.target.value)}>
                 <option value="">Select baggage record</option>
                 {baggage.map((bag) => (
                   <option key={bag.id} value={bag.id}>
@@ -902,95 +874,102 @@ function Dashboard() {
                   </option>
                 ))}
               </select>
-
-              <button 
-                onClick={updateBaggage}
-                disabled={!selectedBaggageId}
-              >
-                Update Selected Status
-              </button>
-              
-              <button className="secondary" onClick={loadBaggage}>
-                Load Baggage
-              </button>
+              <button className="btn-secondary" onClick={updateBaggage} disabled={!selectedBaggageId}>Update Status</button>
+              <button className="btn-secondary" onClick={loadBaggage}>Load Baggage</button>
             </div>
           </div>
-
-          <div className="list">
-            {baggage.length === 0 ? (
-              <div className="empty-state">
-                No baggage records found. Create your first baggage record!
-              </div>
+          <div className="panel-section">
+            <div className="search-wrapper">
+              <SearchBar placeholder="Search baggage..." value={searchStates.baggage} onChange={(val) => updateSearch("baggage", val)} onSearch={() => {}} />
+            </div>
+            {loadingStates.baggage ? (
+              <SkeletonLoader type="list" count={5} />
             ) : (
-              baggage.map((bag) => (
-                <div 
-                  className="list-item" 
-                  key={bag.id}
-                  onClick={() => setSelectedBaggageId(bag.id)}
-                  style={{
-                    borderLeftColor: selectedBaggageId === bag.id ? 'var(--accent)' : 'var(--primary)',
-                    background: selectedBaggageId === bag.id ? 'white' : undefined
-                  }}
-                >
-                  <strong>{bag.tagNumber}</strong>
-                  <p>Passenger: {bag.passengerName}</p>
-                  <p>Booking ID: #{bag.bookingId}</p>
-                  <span>Status: {bag.status}</span>
+              <>
+                {searchStates.baggage && (
+                  <div className="filter-summary">
+                    <span>Found {filteredBaggage.length} results</span>
+                    <button className="clear-filters" onClick={() => clearSearch("baggage")}>Clear</button>
+                  </div>
+                )}
+                <div className="list-container">
+                  <div className="data-list">
+                    {filteredBaggage.length === 0 ? (
+                      <div className="empty-state">No baggage records found</div>
+                    ) : (
+                      filteredBaggage.map((bag) => (
+                        <div className={`list-item ${selectedBaggageId === bag.id ? 'selected' : ''}`} key={bag.id} onClick={() => setSelectedBaggageId(bag.id)}>
+                          <strong>{bag.tagNumber}</strong>
+                          <p>Passenger: {bag.passengerName}</p>
+                          <p>Booking ID: #{bag.bookingId}</p>
+                          <span className="list-item-badge">{bag.status}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-              ))
+              </>
             )}
           </div>
         </section>
 
         {userRole === "admin" && (
-          <section id="users" className="panel">
+          <section id="dashboard-users" className="panel">
             <div className="panel-header">
-              <div>
-                <h2>Admin User Management</h2>
-                <p>Only admins can view users and update account roles.</p>
+              <div className="panel-header-left">
+                <h2>User Management</h2>
+                <p>Manage platform users, access permissions, and role assignments across passenger, staff, and administrative accounts.</p>
               </div>
-
-              <button onClick={loadUsers}>Load Users</button>
+              <div className="panel-header-actions">
+                <SearchBar placeholder="Search users..." value={searchStates.users} onChange={(val) => updateSearch("users", val)} onSearch={() => {}} />
+                <button className="btn-primary" onClick={loadUsers}>Load Users</button>
+              </div>
             </div>
-
-            <div className="list">
-              {users.map((user) => (
-                <div className="list-item" key={user.email}>
-                  <strong>{user.name}</strong>
-                  <p>{user.email}</p>
-                  <p>Current role: {user.role}</p>
-
-                  <select
-                    value={user.role}
-                    onChange={(e) => updateUserRole(user.email, e.target.value)}
-                  >
-                    <option value="user">user</option>
-                    <option value="passenger">passenger</option>
-                    <option value="staff">staff</option>
-                    <option value="admin">admin</option>
-                  </select>
+            {loadingStates.users ? (
+              <SkeletonLoader type="list" count={5} />
+            ) : (
+              <>
+                {searchStates.users && (
+                  <div className="filter-summary">
+                    <span>Found {filteredUsers.length} results</span>
+                    <button className="clear-filters" onClick={() => clearSearch("users")}>Clear</button>
+                  </div>
+                )}
+                <div className="list-container">
+                  <div className="data-list">
+                    {filteredUsers.length === 0 ? (
+                      <div className="empty-state">No users found</div>
+                    ) : (
+                      filteredUsers.map((user) => (
+                        <div className="list-item user-item" key={user.email}>
+                          <div className="user-info">
+                            <strong>{user.name}</strong>
+                            <p>{user.email}</p>
+                            <span className="user-role">Current role: {user.role}</span>
+                          </div>
+                          <select className="select-input role-select" value={user.role} onChange={(e) => updateUserRole(user.email, e.target.value)}>
+                            <option value="user">user</option>
+                            <option value="passenger">passenger</option>
+                            <option value="staff">staff</option>
+                            <option value="admin">admin</option>
+                          </select>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-              ))}
-            </div>
+              </>
+            )}
           </section>
         )}
 
         {isAdminOrStaff && (
-          <section id="airport" className="panel two-column">
-            <div>
+          <section id="dashboard-airport" className="panel two-column">
+            <div className="panel-section">
               <h2>Airport Integration</h2>
-              <p>
-                Simulate integration with external airport operator systems for gate,
-                boarding, and flight operation updates.
-              </p>
-
+              <p>Exchange operational updates with airport systems, including gate assignments, boarding activities, and flight status information.</p>
               <div className="form-grid">
-                <select
-                  value={airportForm.flightId}
-                  onChange={(e) =>
-                    setAirportForm({ ...airportForm, flightId: e.target.value })
-                  }
-                >
+                <select className="select-input" value={airportForm.flightId} onChange={(e) => setAirportForm({ ...airportForm, flightId: e.target.value })}>
                   <option value="">Select flight</option>
                   {flights.map((flight) => (
                     <option key={flight.id} value={flight.id}>
@@ -998,100 +977,100 @@ function Dashboard() {
                     </option>
                   ))}
                 </select>
-
-                <input
-                  placeholder="Airport code e.g. CMB"
-                  value={airportForm.airportCode}
-                  onChange={(e) =>
-                    setAirportForm({ ...airportForm, airportCode: e.target.value })
-                  }
-                />
-
-                <input
-                  placeholder="Gate e.g. G12"
-                  value={airportForm.gate}
-                  onChange={(e) =>
-                    setAirportForm({ ...airportForm, gate: e.target.value })
-                  }
-                />
-
-                <select
-                  value={airportForm.status}
-                  onChange={(e) =>
-                    setAirportForm({ ...airportForm, status: e.target.value })
-                  }
-                >
+                <input className="text-input" placeholder="Airport code" value={airportForm.airportCode} onChange={(e) => setAirportForm({ ...airportForm, airportCode: e.target.value })} />
+                <input className="text-input" placeholder="Gate" value={airportForm.gate} onChange={(e) => setAirportForm({ ...airportForm, gate: e.target.value })} />
+                <select className="select-input" value={airportForm.status} onChange={(e) => setAirportForm({ ...airportForm, status: e.target.value })}>
                   <option value="BOARDING_OPEN">BOARDING_OPEN</option>
                   <option value="GATE_ASSIGNED">GATE_ASSIGNED</option>
                   <option value="FINAL_CALL">FINAL_CALL</option>
                   <option value="BOARDING_CLOSED">BOARDING_CLOSED</option>
                   <option value="DEPARTED">DEPARTED</option>
                 </select>
-
-                <input
-                  placeholder="Airport message"
-                  value={airportForm.message}
-                  onChange={(e) =>
-                    setAirportForm({ ...airportForm, message: e.target.value })
-                  }
-                />
+                <input className="text-input" placeholder="Message" value={airportForm.message} onChange={(e) => setAirportForm({ ...airportForm, message: e.target.value })} />
               </div>
-
-              <div className="actions">
-                <button onClick={createAirportEvent}>Send Airport Update</button>
-                <button className="secondary" onClick={loadAirportEvents}>
-                  Load Airport Events
-                </button>
+              <div className="actions-group">
+                <button className="btn-primary" onClick={createAirportEvent}>Send Airport Update</button>
+                <button className="btn-secondary" onClick={loadAirportEvents}>Load Events</button>
               </div>
             </div>
-
-            <div className="list">
-              {airportEvents.length === 0 ? (
-                <div className="empty-state">
-                  No airport events found. Send an airport operational update.
-                </div>
+            <div className="panel-section">
+              <div className="search-wrapper">
+                <SearchBar placeholder="Search airport events..." value={searchStates.airportEvents} onChange={(val) => updateSearch("airportEvents", val)} onSearch={() => {}} />
+              </div>
+              {loadingStates.airportEvents ? (
+                <SkeletonLoader type="list" count={5} />
               ) : (
-                airportEvents.map((event) => (
-                  <div className="list-item" key={event.id}>
-                    <strong>{event.status}</strong>
-                    <p>Flight ID: {event.flightId}</p>
-                    <p>Airport: {event.airportCode}</p>
-                    <p>Gate: {event.gate}</p>
-                    <p>{event.message}</p>
-                    <span>{event.sourceSystem}</span>
+                <>
+                  {searchStates.airportEvents && (
+                    <div className="filter-summary">
+                      <span>Found {filteredAirportEvents.length} results</span>
+                      <button className="clear-filters" onClick={() => clearSearch("airportEvents")}>Clear</button>
+                    </div>
+                  )}
+                  <div className="list-container">
+                    <div className="data-list">
+                      {filteredAirportEvents.length === 0 ? (
+                        <div className="empty-state">No airport events found</div>
+                      ) : (
+                        filteredAirportEvents.map((event) => (
+                          <div className="list-item" key={event.id}>
+                            <strong>{event.status}</strong>
+                            <p>Flight ID: {event.flightId}</p>
+                            <p>Airport: {event.airportCode}</p>
+                            <p>Gate: {event.gate}</p>
+                            <p>{event.message}</p>
+                            <span className="list-item-badge">{event.sourceSystem}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
-                ))
+                </>
               )}
             </div>
           </section>
         )}
 
-        <section id="notifications" className="panel">
+        <section id="dashboard-notifications" className="panel">
           <div className="panel-header">
-            <div>
+            <div className="panel-header-left">
               <h2>Event Notifications</h2>
-              <p>
-                Notifications are generated from operational service events such
-                as baggage status updates.
-              </p>
+              <p>Monitor operational alerts and service events generated across flight, baggage, booking, payment, and airport workflows.</p>
             </div>
-
-            <button onClick={loadNotifications}>Load Notifications</button>
+            <div className="panel-header-actions">
+              <SearchBar placeholder="Search notifications..." value={searchStates.notifications} onChange={(val) => updateSearch("notifications", val)} onSearch={() => {}} />
+              <button className="btn-primary" onClick={loadNotifications}>Load Notifications</button>
+            </div>
           </div>
-
-          <div className="notification-list">
-            {notifications.map((note) => (
-              <div className="notification" key={note.id}>
-                <div className="dot"></div>
-                <div>
-                  <strong>{note.type}</strong>
-                  <p>Booking ID: #{note.bookingId || "N/A"}</p>
-                  <p>{note.message}</p>
-                  <small>{new Date(note.createdAt).toLocaleString()}</small>
+          {loadingStates.notifications ? (
+            <SkeletonLoader type="list" count={5} />
+          ) : (
+            <>
+              {searchStates.notifications && (
+                <div className="filter-summary">
+                  <span>Found {filteredNotifications.length} results</span>
+                  <button className="clear-filters" onClick={() => clearSearch("notifications")}>Clear</button>
                 </div>
+              )}
+              <div className="notification-list">
+                {filteredNotifications.length === 0 ? (
+                  <div className="empty-state">No notifications found</div>
+                ) : (
+                  filteredNotifications.map((note) => (
+                    <div className="notification-item" key={note.id}>
+                      <div className="notification-dot"></div>
+                      <div className="notification-content">
+                        <strong>{note.type}</strong>
+                        <p>Booking ID: #{note.bookingId || "N/A"}</p>
+                        <p className="notification-message">{note.message}</p>
+                        <small>{new Date(note.createdAt).toLocaleString()}</small>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
-            ))}
-          </div>
+            </>
+          )}
         </section>
       </main>
     </div>
