@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
+import OAuthCallback from "./pages/OAuthCallback";
 import "./App.css";
 
 function SwaggerPage() {
@@ -46,12 +47,29 @@ function App() {
 
         <Route
           path="/dashboard"
-          element={token ? <Dashboard /> : <Navigate to="/login" replace />}
+          element={
+            token ? (
+              <Dashboard setToken={setToken} />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
         />
 
         <Route
           path="/swagger"
-          element={token ? <SwaggerPage /> : <Navigate to="/login" replace />}
+          element={
+            token ? (
+              <SwaggerPage />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+
+        <Route
+          path="/oauth-callback"
+          element={<OAuthCallback setToken={setToken} />}
         />
 
         <Route path="*" element={<Navigate to="/" replace />} />

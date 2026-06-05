@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 
@@ -10,6 +10,40 @@ function Login({ setToken }) {
   const [password, setPassword] = useState("Admin123");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    const completeOAuthLogin = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get("code");
+  
+      if (!code) return;
+  
+      try {
+        setIsLoading(true);
+        setMessage("Completing OAuth 2.0 login...");
+  
+        const res = await axios.post(`${API}/auth/oauth/callback`, { code });
+  
+        localStorage.setItem("token", res.data.token);
+        setToken(res.data.token);
+  
+        const payload = JSON.parse(atob(res.data.token.split(".")[1]));
+  
+        localStorage.setItem("userEmail", payload.email);
+        localStorage.setItem("userRole", payload.role);
+  
+        setMessage("OAuth login successful");
+  
+        window.history.replaceState({}, document.title, "/#/dashboard");
+        navigate("/dashboard", { replace: true });
+      } catch (error) {
+        setMessage(error.response?.data?.message || "OAuth login failed");
+        setIsLoading(false);
+      }
+    };
+  
+    completeOAuthLogin();
+  }, [navigate, setToken]); 
 
   const login = async (e) => {
     e.preventDefault();
@@ -46,6 +80,12 @@ function Login({ setToken }) {
     }
   };
 
+  const loginWithOAuth = () => {
+    const cognitoLoginUrl =
+      "https://us-east-1x3w8w0nui.auth.us-east-1.amazoncognito.com/login?client_id=11158ktkrel6q88oo5pa5a6lhu&response_type=code&scope=email+openid+phone&redirect_uri=https%3A%2F%2Fd1golwq2x99wr4.cloudfront.net%2Foauth-callback";
+  
+    window.location.href = cognitoLoginUrl;
+  };
   return (
     <div className="auth-page">
       <div className="auth-bg-gradient"></div>
@@ -113,6 +153,14 @@ function Login({ setToken }) {
                 "Sign In"
               )}
             </button>
+            <button
+            type="button"
+            className="auth-button"
+            onClick={loginWithOAuth}
+            style={{ marginTop: "12px" }}
+          >
+            Sign in with Amazon Cognito 
+          </button>
           </form>
 
           {message && (

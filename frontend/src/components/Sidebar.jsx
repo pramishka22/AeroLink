@@ -1,13 +1,18 @@
 import { useNavigate } from "react-router-dom";
 
-function Sidebar() {
-  const navigate = useNavigate();
+function Sidebar({ setToken }) {
+    const navigate = useNavigate();
   const userEmail = localStorage.getItem("userEmail");
   const userRole = localStorage.getItem("userRole");
 
   const logout = () => {
-    localStorage.clear();
-    navigate("/login");
+    localStorage.removeItem("token");
+    localStorage.removeItem("userEmail");
+    localStorage.removeItem("userRole");
+  
+    setToken(null);
+  
+    navigate("/login", { replace: true });
   };
 
   const scrollToSection = (id) => {

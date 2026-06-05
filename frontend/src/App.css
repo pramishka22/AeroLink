@@ -1377,6 +1377,26 @@ body {
   font-size: 0.75rem;
   color: rgba(255, 255, 255, 0.35);
 }
+.consent-box {
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.consent-label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 1.4;
+}
+
+.consent-label input {
+  margin-top: 3px;
+}
 
 @media (max-width: 768px) {
   .auth-card-login {

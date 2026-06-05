@@ -5,11 +5,12 @@ import Navbar from "../components/Navbar";
 import LoadingSpinner from "../components/LoadingSpinner";
 import SkeletonLoader from "../components/SkeletonLoader";
 import SearchBar from "../components/SearchBar";
+import { Navigate } from "react-router-dom";
 
 const API = "https://yzyfq3ys00.execute-api.us-east-1.amazonaws.com/prod";
 
-function Dashboard() {
-  const [flights, setFlights] = useState([]);
+function Dashboard({ setToken }) {
+    const [flights, setFlights] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [baggage, setBaggage] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -82,8 +83,7 @@ function Dashboard() {
   const isAdminOrStaff = userRole === "admin" || userRole === "staff";
 
   if (!token) {
-    window.location.href = "/#/login";
-    return null;
+    return <Navigate to="/login" replace />;
   }
 
   const authHeader = {
@@ -560,7 +560,7 @@ function Dashboard() {
 
   return (
     <div className="app">
-      <Sidebar />
+    <Sidebar setToken={setToken} />
       <main className="main">
         <Navbar message={message} />
         
