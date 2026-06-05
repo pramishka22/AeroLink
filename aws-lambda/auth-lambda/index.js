@@ -193,7 +193,110 @@ exports.handler = async (event) => {
           }
         });
       }
+
+      if (cleanPath === "/auth/oauth/callback" && method === "POST") {
+        const { code } = body;
       
+        if (!code) {
+          return response(400, { message: "Authorization code is required" });
+        }
+      
+        const COGNITO_DOMAIN = "https://us-east-1x3w8w0nui.auth.us-east-1.amazoncognito.com";
+        const CLIENT_ID = "11158ktkrel6q88oo5pa5a6lhu";
+        const REDIRECT_URI = "https://d1golwq2x99wr4.cloudfront.net/oauth-callback";
+      
+        const tokenParams = new URLSearchParams();
+        tokenParams.append("grant_type", "authorization_code");
+        tokenParams.append("client_id", CLIENT_ID);
+        tokenParams.append("code", code);
+        tokenParams.append("redirect_uri", REDIRECT_URI);
+      
+        const tokenResponse = await fetch(`${COGNITO_DOMAIN}/oauth2/token`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          body: tokenParams.toString()
+        });
+      
+        if (!tokenResponse.ok) {
+          const errorText = await tokenResponse.text();
+          return response(401, {
+            message: "OAuth token exchange failed",
+            error: errorText
+          });
+        }
+      
+        const tokens = await tokenResponse.json();
+      
+        const userInfoResponse = await fetch(`${COGNITO_DOMAIN}/oauth2/userInfo`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${tokens.access_token}`
+          }
+        });
+      
+        if (!userInfoResponse.ok) {
+          return response(401, { message: "Failed to retrieve OAuth user information" });
+        }
+      
+        const cognitoUser = await userInfoResponse.json();
+      
+        const email = cognitoUser.email;
+        const name = cognitoUser.name || cognitoUser.email;
+        const role = "passenger";
+      
+        if (!email) {
+          return response(400, { message: "OAuth user email not found" });
+        }
+      
+        const existingUser = await dynamoDB.send(
+          new GetCommand({
+            TableName: USERS_TABLE,
+            Key: { email }
+          })
+        );
+      
+        if (!existingUser.Item) {
+          await dynamoDB.send(
+            new PutCommand({
+              TableName: USERS_TABLE,
+              Item: {
+                email,
+                name,
+                password: "COGNITO_OAUTH_USER",
+                role,
+                authProvider: "COGNITO_OAUTH2",
+                consentAccepted: true,
+                consentTimestamp: new Date().toISOString(),
+                createdAt: new Date().toISOString()
+              }
+            })
+          );
+        }
+      
+        const token = jwt.sign(
+          {
+            email,
+            role: existingUser.Item?.role || role,
+            authProvider: "COGNITO_OAUTH2"
+          },
+          JWT_SECRET,
+          { expiresIn: "1h" }
+        );
+      
+        return response(200, {
+          message: "OAuth login successful",
+          token,
+          user: {
+            email,
+            name,
+            role: existingUser.Item?.role || role
+          }
+        });
+      }
+
+
     return response(404, {
       message: "Route not found",
       path,
