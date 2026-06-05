@@ -37,6 +37,7 @@ The system utilizes AWS cloud services to ensure scalability, availability, secu
 * Amazon S3
 * Amazon CloudFront
 * Amazon Route 53
+* Amazon Cognito
 * AWS WAF
 
 ### Architecture Style
