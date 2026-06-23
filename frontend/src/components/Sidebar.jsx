@@ -27,7 +27,7 @@ function Sidebar({ setToken }) {
         behavior: "smooth"
       });
     }
-  };
+  }; v
 
   return (
     <aside className="sidebar">
